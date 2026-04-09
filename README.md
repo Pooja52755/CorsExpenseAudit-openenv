@@ -1,15 +1,11 @@
----
-title: My Env Environment Server
-emoji: 📀
-colorFrom: purple
-colorTo: gray
+title: Corps ExpenseAudit Openenv
+emoji: 🐢
+colorFrom: pink
+colorTo: indigo
 sdk: docker
+app_port: 7860
 pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
----
+license: mit
 
 # My Env Environment
 
