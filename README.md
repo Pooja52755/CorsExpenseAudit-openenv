@@ -4,7 +4,7 @@ emoji: 💼
 colorFrom: pink
 colorTo: indigo
 sdk: docker
-app_port: 8000
+app_port: 7860
 pinned: false
 license: mit
 ---
@@ -161,7 +161,7 @@ The client supports context manager usage for automatic connection management:
 from my_env import MyAction, MyEnv
 
 # Connect with context manager (auto-connects and closes)
-with MyEnv(base_url="http://localhost:8000") as env:
+with MyEnv(base_url="http://localhost:7860") as env:
     result = env.reset()
     print(f"Reset: {result.observation.echoed_message}")
     # Multiple steps with low latency
@@ -197,7 +197,7 @@ from my_env import MyAction, MyEnv
 from concurrent.futures import ThreadPoolExecutor
 
 def run_episode(client_id: int):
-    with MyEnv(base_url="http://localhost:8000") as env:
+    with MyEnv(base_url="http://localhost:7860") as env:
         result = env.reset()
         for i in range(10):
             result = env.step(MyAction(message=f"Client {client_id}, step {i}"))
