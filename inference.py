@@ -91,6 +91,7 @@ class ExpenseAuditAgent:
         
         # 1. Check for remote config
         self.env_base_url = os.getenv("ENVIRONMENT_BASE_URL", "https://elion-sakshith-corpexpenseaudit-openenv.hf.space/")
+        self.env_base_url = self.env_base_url.rstrip('/')
         self.use_remote_env = self.env_base_url and "http" in self.env_base_url
         
         
