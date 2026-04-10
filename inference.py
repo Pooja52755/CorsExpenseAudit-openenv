@@ -5,7 +5,7 @@ CorpExpenseAudit inference agent using OpenAI-compatible API.
 Matches OpenEnv STDOUT format:
   [START] task=<task> env=<env> model=<model>
   [STEP] step=<n> action=<action> reward=<r> done=<bool> error=<msg>
-  [END] success=<bool> steps=<n> score=<score> rewards=<r1,r2,...>
+  [END] success=<bool> steps=<n> rewards=<r1,r2,...>
 
 Supports:
 - OpenAI API / Groq API / Hugging Face Router / Any OpenAI-compatible endpoint
@@ -56,10 +56,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     """Emit [END] line to stdout."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
 class ExpenseAuditAgent:
@@ -70,12 +70,17 @@ class ExpenseAuditAgent:
         self.task_difficulty = task_difficulty
         self.max_steps = max_steps
 
-        self.HF_TOKEN = os.getenv("HF_TOKEN")
+        HF_TOKEN = os.getenv("HF_TOKEN")
         
         # Get LLM API config
         api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         
         self.api_key = self._get_api_key() or "validation-only-key"
+
+        if HF_TOKEN is None:
+            # Use a print first so you see it in logs, then the mandatory raise
+            print("[ERROR] HF_TOKEN is missing!")
+            raise ValueError("HF_TOKEN environment variable is required")
         
         self.client = OpenAI(
             api_key=self.api_key,
@@ -85,7 +90,7 @@ class ExpenseAuditAgent:
         self.model = os.getenv("MODEL_NAME", "gpt-4-turbo-preview")
         
         # 1. Check for remote config
-        self.env_base_url = os.getenv("ENVIRONMENT_BASE_URL", "https://pooja52755-corps-expenseaudit-openenv.hf.space")
+        self.env_base_url = os.getenv("ENVIRONMENT_BASE_URL", "https://elion-sakshith-corpexpenseaudit-openenv.hf.space/")
         self.use_remote_env = self.env_base_url and "http" in self.env_base_url
         
         
@@ -294,7 +299,7 @@ class ExpenseAuditAgent:
         
         finally:
             # Emit [END] line
-            log_end(success=success, steps=self.step_count, score=score, rewards=self.rewards)
+            log_end(success=success, steps=self.step_count, rewards=self.rewards)
         
         return {
             "task_difficulty": self.task_difficulty,
