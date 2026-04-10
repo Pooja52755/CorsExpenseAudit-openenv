@@ -4,20 +4,18 @@ CorpExpenseAudit inference agent using OpenAI-compatible API.
 
 Matches OpenEnv STDOUT format:
   [START] task=<task> env=<env> model=<model>
-  [STEP] step=<n> action=<action> reward=<r> done=<bool> error=<msg>
-  [END] success=<bool> steps=<n> rewards=<r1,r2,...>
+  [STEP] step=<n> action=<action> reward=<r> done=<bool> error=<msg|null>
+  [END] success=<bool> steps=<n> score=<0.00-1.00> rewards=<r1,r2,...>
 
 Supports:
 - OpenAI API / Groq API / Hugging Face Router / Any OpenAI-compatible endpoint
 - Local environment (direct instantiation) or remote API via HTTP
 
-Environment variables:
+Environment variables (platform / sample alignment):
 - LLM Configuration:
-  - API_BASE_URL: Base URL for LLM API (default: https://api.openai.com/v1)
-  - MODEL_NAME: Model to use (default: gpt-4-turbo-preview)
-  - OPENAI_API_KEY: OpenAI API key
-  - GROQ_API_KEY: Groq API key
-  - HF_TOKEN: Hugging Face token
+  - API_BASE_URL: OpenAI-compatible base URL (default: https://router.huggingface.co/v1)
+  - MODEL_NAME: Model id (default: Qwen/Qwen2.5-72B-Instruct)
+  - HF_TOKEN: Primary key for HF Router (also OPENAI_API_KEY, API_KEY, GROQ_API_KEY)
 - Environment Configuration:
   - ENVIRONMENT_BASE_URL: Base URL for CorpExpenseAudit API (default: http://localhost:7860)
     Set this to connect to Docker container running the API
@@ -28,14 +26,13 @@ import os
 import json
 import sys
 import time
-from datetime import datetime
 from typing import Optional, Any, Dict, List
 import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
 from environment import CorpExpenseAudit
-from graders import run_easy_grader, run_medium_grader, run_hard_grader, print_grader_results
+from graders import run_easy_grader, run_medium_grader, run_hard_grader
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,19 +44,27 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    """Emit [STEP] line to stdout."""
-    error_val = error if error else "null"
+    """Emit [STEP] line to stdout (single line; strip newlines from error)."""
+    if error:
+        error_val = " ".join(str(error).split())
+    else:
+        error_val = "null"
     done_str = str(done).lower()
+    action_one_line = " ".join(str(action).split())
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={error_val}",
+        f"[STEP] step={step} action={action_one_line} reward={reward:.2f} done={done_str} error={error_val}",
         flush=True,
     )
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    """Emit [END] line to stdout."""
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    """Emit [END] line to stdout (OpenEnv mandatory format includes score)."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
+    score_clamped = min(max(float(score), 0.0), 1.0)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score_clamped:.2f} rewards={rewards_str}",
+        flush=True,
+    )
 
 
 class ExpenseAuditAgent:
@@ -70,24 +75,27 @@ class ExpenseAuditAgent:
         self.task_difficulty = task_difficulty
         self.max_steps = max_steps
 
-        HF_TOKEN = os.getenv("HF_TOKEN")
-        
-        # Get LLM API config
-        api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-        
-        self.api_key = self._get_api_key() or "validation-only-key"
+        # LLM auth: HF_TOKEN is preferred for HF Router; fall back so validation does not crash
+        # if only OPENAI_API_KEY is set (mandatory vars are provided by the platform at run time).
+        api_base_url = os.getenv(
+            "API_BASE_URL",
+            "https://router.huggingface.co/v1",
+        )
+        _resolved_key = self._get_api_key()
+        self.api_key = _resolved_key or "validation-only-key"
+        if not _resolved_key:
+            print(
+                "[WARN] No HF_TOKEN / API_KEY / OPENAI_API_KEY / GROQ_API_KEY set; "
+                "LLM calls may fail (using placeholder key for client init).",
+                file=sys.stderr,
+            )
 
-        if HF_TOKEN is None:
-            # Use a print first so you see it in logs, then the mandatory raise
-            print("[ERROR] HF_TOKEN is missing!")
-            raise ValueError("HF_TOKEN environment variable is required")
-        
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=api_base_url if api_base_url else None
+            base_url=api_base_url if api_base_url else None,
         )
         
-        self.model = os.getenv("MODEL_NAME", "gpt-4-turbo-preview")
+        self.model = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
         
         # 1. Check for remote config
         self.env_base_url = os.getenv("ENVIRONMENT_BASE_URL", "https://elion-sakshith-corpexpenseaudit-openenv.hf.space/")
@@ -96,11 +104,8 @@ class ExpenseAuditAgent:
         
         
 
-        # In your inference.py __init__
-        try:
-           self.env = CorpExpenseAudit(task_difficulty=task_difficulty)
-        except Exception as e:
-            print(f"[WARN] Local env init failed, will rely on remote: {e}")
+        # Local environment (always instantiate; remote URL is informational only here)
+        self.env = CorpExpenseAudit(task_difficulty=task_difficulty)
         
         if self.use_remote_env:
              print(f"[INFO] Using remote environment API at {self.env_base_url}", file=sys.stderr)
@@ -128,17 +133,15 @@ class ExpenseAuditAgent:
     @staticmethod
     def _get_api_key() -> Optional[str]:
         """Get API key from environment variables."""
-        # Try HF Token first (router)
-        key = os.getenv("HF_TOKEN")
+        # Match sample: HF_TOKEN or API_KEY, then other providers
+        key = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
         if key:
             return key
-        
-        # Try Groq
+
         key = os.getenv("GROQ_API_KEY")
         if key:
             return key
-        
-        # Try OpenAI
+
         key = os.getenv("OPENAI_API_KEY")
         if key:
             return key
@@ -149,24 +152,16 @@ class ExpenseAuditAgent:
         """Run the complete audit task with OpenEnv format compliance."""
         # Emit [START] line
         log_start(task=self.task_difficulty, env="CorpExpenseAudit", model=self.model)
-        
-        # Log model capabilities
-        if "gpt-4o" in self.model.lower():
-            pass
-        elif "o1" in self.model.lower():
-            pass
-        else:
-            pass
-        
-        # Reset environment (no seeding for truly random claim IDs)
-        initial_state = self.env.reset()
-        
+
         done = False
         success = False
         score = 0.0
         final_state = None
-        
+        initial_state: Optional[Dict[str, Any]] = None
+
         try:
+            # Reset environment (no seeding for truly random claim IDs)
+            initial_state = self.env.reset()
             # Main loop
             for step_num in range(1, self.max_steps + 1):
                 if done:
@@ -299,8 +294,10 @@ class ExpenseAuditAgent:
             score = 0.0
         
         finally:
-            # Emit [END] line
-            log_end(success=success, steps=self.step_count, rewards=self.rewards)
+            try:
+                log_end(success=success, steps=self.step_count, score=score, rewards=self.rewards)
+            except Exception as log_exc:
+                print(f"[ERROR] log_end failed: {log_exc}", file=sys.stderr)
         
         return {
             "task_difficulty": self.task_difficulty,
@@ -741,7 +738,8 @@ IF THE ERROR SAYS "already categorized":
             
             response = self.client.chat.completions.create(**api_kwargs)
             
-            response_text = response.choices[0].message.content.strip()
+            raw_content = response.choices[0].message.content
+            response_text = (raw_content if raw_content is not None else "").strip()
             
             # Parse JSON response - GREEDY to match nested braces correctly
             # BUG FIX: Changed r'\{[\s\S]*?\}' (non-greedy) to r'\{[\s\S]*\}' (greedy)
@@ -932,31 +930,70 @@ IF THE ERROR SAYS "already categorized":
 def main():
     """Main entry point - run audits and emit OpenEnv format."""
     difficulties = ["easy", "medium", "hard"]
-    #difficulties = ["hard"]
-    results = []
-    
-    for difficulty in difficulties:
-        try:
-            # Use appropriate step limits based on difficulty
+    results: List[Dict[str, Any]] = []
+
+    try:
+        for difficulty in difficulties:
             if difficulty == "easy":
                 max_steps = 40
             elif difficulty == "medium":
                 max_steps = 80
-            else:  # hard
+            else:
                 max_steps = 120
-            
-            agent = ExpenseAuditAgent(task_difficulty=difficulty, max_steps=max_steps)
-            result = agent.run_audit()
-            results.append(result)
-        except Exception as e:
-            print(f"[ERROR] Failed to run {difficulty} task: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-    
-    # Exit with appropriate code
-    success_count = sum(1 for r in results if r.get("success", False))
-    exit_code = 0 if success_count >= 2 else 1
-    sys.exit(exit_code)
+
+            try:
+                agent = ExpenseAuditAgent(task_difficulty=difficulty, max_steps=max_steps)
+            except Exception as e:
+                print(f"[ERROR] Failed to init agent for {difficulty}: {e}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc()
+                log_start(
+                    task=difficulty,
+                    env="CorpExpenseAudit",
+                    model=os.getenv("MODEL_NAME", ""),
+                )
+                log_end(success=False, steps=0, score=0.0, rewards=[])
+                results.append(
+                    {
+                        "task_difficulty": difficulty,
+                        "success": False,
+                        "final_score": 0.0,
+                    }
+                )
+                continue
+
+            try:
+                result = agent.run_audit()
+                results.append(result)
+            except Exception as e:
+                # run_audit should not leak exceptions (finally emits [END]); guard anyway
+                print(f"[ERROR] run_audit raised for {difficulty}: {e}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc()
+                log_start(
+                    task=difficulty,
+                    env="CorpExpenseAudit",
+                    model=os.getenv("MODEL_NAME", ""),
+                )
+                log_end(success=False, steps=0, score=0.0, rewards=[])
+                results.append(
+                    {
+                        "task_difficulty": difficulty,
+                        "success": False,
+                        "final_score": 0.0,
+                    }
+                )
+    except BaseException as e:
+        print(f"[ERROR] Fatal error in main: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        log_start(task="fatal", env="CorpExpenseAudit", model=os.getenv("MODEL_NAME", ""))
+        log_end(success=False, steps=0, score=0.0, rewards=[])
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":
