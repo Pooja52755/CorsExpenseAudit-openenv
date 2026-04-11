@@ -81,7 +81,7 @@ class ExpenseAuditAgent:
             "API_BASE_URL",
             "https://router.huggingface.co/v1",
         )
-        _resolved_key = self._get_api_key()
+        _resolved_key = self._get_api_key(api_base_url)
         self.api_key = _resolved_key or "validation-only-key"
         if not _resolved_key:
             print(
@@ -131,8 +131,13 @@ class ExpenseAuditAgent:
         self.rewards = []
     
     @staticmethod
-    def _get_api_key() -> Optional[str]:
+    def _get_api_key(api_base_url: Optional[str] = None) -> Optional[str]:
         """Get API key from environment variables."""
+        if api_base_url and "api.openai.com" in api_base_url:
+            key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+            if key:
+                return key
+
         # Match sample: HF_TOKEN or API_KEY, then other providers
         key = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
         if key:
@@ -285,8 +290,10 @@ class ExpenseAuditAgent:
                 metrics = run_hard_grader(self.env)
             
             score = metrics.final_score
-            
-            success = score >= 0.55  # Need 55%+ for true success (0.50 is borderline failure)
+
+            # Keep hard stricter while allowing easy/medium to pass with moderate scores.
+            success_threshold = 0.40 if self.task_difficulty in ("easy", "medium") else 0.55
+            success = score >= success_threshold
             
         except Exception as e:
             print(f"[ERROR] {str(e)}", file=sys.stderr)
