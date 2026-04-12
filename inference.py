@@ -132,22 +132,24 @@ class ExpenseAuditAgent:
     
     @staticmethod
     def _get_api_key(api_base_url: Optional[str] = None) -> Optional[str]:
-        """Get API key from environment variables."""
-        if api_base_url and "api.openai.com" in api_base_url:
-            key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
-            if key:
-                return key
-
-        # Match sample: HF_TOKEN or API_KEY, then other providers
-        key = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-        if key:
-            return key
-
-        key = os.getenv("GROQ_API_KEY")
-        if key:
-            return key
-
-        key = os.getenv("OPENAI_API_KEY")
+        """Get API key from environment variables based on api_base_url."""
+        if api_base_url:
+            api_base_lower = api_base_url.lower()
+            
+            # OpenAI backend
+            if "api.openai.com" in api_base_lower or "openai" in api_base_lower:
+                key = os.getenv("OPENAI_API_KEY")
+                if key:
+                    return key
+            
+            # Nvidia backend
+            elif "nvidia" in api_base_lower or "nv-api" in api_base_lower:
+                key = os.getenv("NVIDIA_API_KEY")
+                if key:
+                    return key
+        
+        # Default: HuggingFace Router
+        key = os.getenv("HF_TOKEN")
         if key:
             return key
         

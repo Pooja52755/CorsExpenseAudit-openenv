@@ -298,27 +298,55 @@ curl http://localhost:7860/state/abc12345
 
 ### Running with LLM Integration
 
-The `inference.py` script automates agent creation and task execution:
+The `inference.py` script automates agent creation and task execution. API key selection is automatic based on `API_BASE_URL`:
+
+**Setup via .env file** (recommended):
+
+1. Copy `.env.example` to `.env`
+2. Configure your preferred backend:
 
 ```bash
-# Run with default settings (HuggingFace Router + Qwen model)
-export HF_TOKEN="your-token"
-python inference.py
+# === Option 1: OpenAI (gpt-4o-mini) ===
+API_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-your-key-here
+MODEL_NAME=gpt-4o-mini
 
-# Or customize
+# === Option 2: Nvidia (Nemotron) ===
+API_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_API_KEY=nvapi-your-key-here
+MODEL_NAME=nvidia/nemotron-3-super-120b-a12b
+
+# === Option 3: HuggingFace (Qwen - free) ===
+# API_BASE_URL=https://router.huggingface.co/v1  (default if omitted)
+HF_TOKEN=hf_your-token-here
+MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+
+# Optional: connect to remote server
+ENVIRONMENT_BASE_URL=http://localhost:7860
+```
+
+**Auto API Key Selection:**
+- If `API_BASE_URL` contains `"openai"` → uses `OPENAI_API_KEY`
+- If `API_BASE_URL` contains `"nvidia"` → uses `NVIDIA_API_KEY`
+- Otherwise (or default) → uses `HF_TOKEN`
+
+**Run the agent:**
+```bash
+python inference.py
+```
+
+**Or set env vars on command line:**
+```bash
+# Quick test with OpenAI
 export API_BASE_URL="https://api.openai.com/v1"
 export OPENAI_API_KEY="sk-..."
 export MODEL_NAME="gpt-4o-mini"
-python inference.py
-
-# Connect to remote server
-export ENVIRONMENT_BASE_URL="http://remote-server:7860"
 python inference.py
 ```
 
 Output will show OpenEnv format:
 ```
-[START] task=audit env=CorpExpenseAudit model=Qwen/Qwen2.5-72B-Instruct
+[START] task=audit env=CorpExpenseAudit model=gpt-4o-mini
 [STEP] step=1 action={'action_type': 'inspect_claim', ...} reward=0.50 done=false error=null
 [STEP] step=2 action={'action_type': 'categorize_claim', ...} reward=0.50 done=false error=null
 ...
@@ -374,11 +402,9 @@ CorpExpenseAudit-openenv/
 ├── environment.py         # CorpExpenseAudit environment logic
 ├── inference.py           # LLM agent for auditing tasks
 ├── graders.py             # Evaluation and scoring
-├── server/
-│   ├── __init__.py
-│   ├── app.py             # FastAPI server implementation
-│   └── __init__.py
-└── openenv_my_env.egg-info/  # Package metadata (generated)
+└── server/
+    ├── __init__.py
+    └── app.py             # FastAPI server implementation
 ```
 
 ## Component Descriptions
